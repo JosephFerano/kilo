@@ -1,8 +1,10 @@
-kilo: kilo.c
-	$(CC) kilo.c -o kilo -Wall -Wextra -pedantic -std=c99
+P=kilo
+OBJECTS=
+CFLAGS=-g -Wall -Wextra -pedantic
+LDLIBS=
+CC=c99
 
-debug: kilo.c
-	$(CC) kilo.c -o kilo -ggdb -Wall -Wextra -pedantic -std=c99
+$(P): $(OBJECTS)
 
 clean:
 	rm ./kilo

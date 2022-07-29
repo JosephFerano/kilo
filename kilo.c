@@ -70,7 +70,7 @@ enum editor_key {
 
 void editor_set_status_message(const char *fmt, ...);
 void editor_refresh_screen();
-char *editor_prompt(char *prompt);
+char *editor_prompt(char *prompt, void (*callback)(char *, int));
 
 /* *** ABUF *** */
 
@@ -186,6 +186,19 @@ int editor_row_cx_to_rx(erow *row, int cx) {
         if (row->chars[j] == '\t')
             rx += (KILO_TAB_STOP - 1) - (rx % KILO_TAB_STOP);
         rx++;
+    }
+    return rx;
+}
+
+int editor_row_rx_to_cx(erow *row, int rx) {
+    int cur_rx = 0;
+    int cx;
+    for (cx = 0; cx < row->size; cx++) {
+        if (row->chars[cx] == '\t')
+            cur_rx += (KILO_TAB_STOP - 1) - (cur_rx % KILO_TAB_STOP);
+        cur_rx++;
+
+        if (cur_rx > rx) return cx;
     }
     return rx;
 }
@@ -364,7 +377,7 @@ char *editor_rows_to_string(int *buflen) {
 
 void editor_save() {
     if (econf.filename == NULL) {
-        econf.filename = editor_prompt("Save as: %s");
+        econf.filename = editor_prompt("Save as: %s", NULL);
         if (econf.filename == NULL) {
             editor_set_status_message("Save aborted");
             return;
@@ -390,9 +403,66 @@ void editor_save() {
     editor_set_status_message("Can't save! I/O error: %s", strerror(errno));
 }
 
+/* *** FIND *** */
+
+void editor_find_callback(char *query, int key) {
+    static int last_match = -1;
+    static int direction = 1;
+
+    if (key == '\r' || key == '\x1b') {
+        last_match = -1;
+        direction = 1;
+        return;
+    } else if (key == ARROW_RIGHT || key == ARROW_DOWN) {
+        direction = 1;
+    } else if (key == ARROW_LEFT || key == ARROW_UP) {
+        direction = -1;
+    } else {
+        last_match = -1;
+        direction = 1;
+    }
+
+    if (last_match == -1) direction = 1;
+    int current = last_match;
+    int i;
+    for (i = 0; i < econf.num_rows; i++) {
+        current += direction;
+        if (current == -1) current = econf.num_rows - 1;
+        else if (current == econf.num_rows) current = 0;
+
+        erow *row = &econf.row[current];
+        char *match = strstr(row->render, query);
+        if (match) {
+            last_match = current;
+            econf.cy = current;
+            econf.cx = editor_row_rx_to_cx(row, match - row->render);
+            econf.row_off = econf.num_rows;
+            break;
+        }
+    }
+}
+
+void editor_find() {
+    int saved_cx = econf.cx;
+    int saved_cy = econf.cy;
+    int saved_col_off = econf.col_off;
+    int saved_row_off = econf.row_off;
+
+    char *query = editor_prompt("Search: %s (Use ESC/Arrows/Enter)", editor_find_callback);
+
+    if (query) {
+        free(query);
+    } else {
+        econf.cx = saved_cx;
+        econf.cy = saved_cy;
+        econf.col_off = saved_col_off;
+        econf.row_off = saved_row_off;
+    }
+}
+
 /* *** INPUT *** */
 
-char *editor_prompt(char *prompt) {
+char *editor_prompt(char *prompt, void (*callback)(char *, int)) {
     size_t bufsize = 128;
     char *buf = malloc(bufsize);
 
@@ -409,11 +479,13 @@ char *editor_prompt(char *prompt) {
                 buf[--buflen] = '\0';
         } else if (c == '\x1b') {
             editor_set_status_message("");
+            if (callback) callback(buf, c);
             free(buf);
             return NULL;
         } else if (c == '\r') {
             if (buflen != 0) {
                 editor_set_status_message("");
+                if (callback) callback(buf, c);
                 return buf;
             }
         } else if (!iscntrl(c) && c < 128) {
@@ -424,6 +496,7 @@ char *editor_prompt(char *prompt) {
             buf[buflen++] = c;
             buf[buflen] = '\0';
         }
+        if (callback) callback(buf, c);
     }
 }
 
@@ -521,6 +594,10 @@ void editor_process_keypress() {
     case END_KEY:
         if (econf.cy < econf.num_rows)
             econf.cx = econf.row[econf.cy].size;
+        break;
+
+    case CTRL_KEY('f'):
+        editor_find();
         break;
 
     case PAGE_UP:
@@ -734,7 +811,7 @@ int main(int argc, char *argv[]) {
         editor_open(argv[1]);
     }
 
-    editor_set_status_message("HELP: Ctrl-S = save | Ctrl-Q = quit");
+    editor_set_status_message("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
 
     while (1) {
         editor_refresh_screen();
