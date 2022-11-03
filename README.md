@@ -1,1 +1,1 @@
-An implementation of [Build Your Own Text Editor](https://viewsourcecode.org/snaptoken/kilo/)
+Source code following the resource: [Build Your Own Text Editor](https://viewsourcecode.org/snaptoken/kilo/)
